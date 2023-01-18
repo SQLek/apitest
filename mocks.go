@@ -3,13 +3,15 @@ package apitest
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/textproto"
 	"net/url"
+	"os"
 	"reflect"
 	"regexp"
 	"sort"
@@ -180,9 +182,15 @@ func buildResponseFromMock(mockResponse *MockResponse) *http.Response {
 	// if the content type isn't set and the body contains json, set content type as json
 	if len(mockResponse.body) > 0 {
 		if len(contentTypeHeader) == 0 {
-			if json.Valid([]byte(mockResponse.body)) {
+			switch {
+
+			case json.Valid([]byte(mockResponse.body)):
 				contentType = "application/json"
-			} else {
+
+			case xml.Unmarshal([]byte(mockResponse.body), new(any)) == nil:
+				contentType = "application/xml"
+
+			default:
 				contentType = "text/plain"
 			}
 		} else {
@@ -191,7 +199,7 @@ func buildResponseFromMock(mockResponse *MockResponse) *http.Response {
 	}
 
 	res := &http.Response{
-		Body:          ioutil.NopCloser(strings.NewReader(mockResponse.body)),
+		Body:          io.NopCloser(strings.NewReader(mockResponse.body)),
 		Header:        mockResponse.headers,
 		StatusCode:    mockResponse.statusCode,
 		ProtoMajor:    1,
@@ -486,7 +494,7 @@ func (r *MockRequest) Bodyf(format string, args ...interface{}) *MockRequest {
 
 // BodyFromFile configures the mock request to match the given body from a file
 func (r *MockRequest) BodyFromFile(f string) *MockRequest {
-	b, err := ioutil.ReadFile(f)
+	b, err := os.ReadFile(f)
 	if err != nil {
 		panic(err)
 	}
@@ -504,6 +512,20 @@ func (r *MockRequest) JSON(v interface{}) *MockRequest {
 	default:
 		asJSON, _ := json.Marshal(x)
 		r.body = string(asJSON)
+	}
+	return r
+}
+
+// JSON is a convenience method for setting the mock request body
+func (r *MockRequest) XML(v interface{}) *MockRequest {
+	switch x := v.(type) {
+	case string:
+		r.body = x
+	case []byte:
+		r.body = string(x)
+	default:
+		asXML, _ := xml.Marshal(x)
+		r.body = string(asXML)
 	}
 	return r
 }
@@ -578,9 +600,7 @@ func (r *MockRequest) QueryParams(queryParams map[string]string) *MockRequest {
 // QueryCollection configures the mock request to match a number of repeating query params, e.g. ?a=1&a=2&a=3
 func (r *MockRequest) QueryCollection(queryParams map[string][]string) *MockRequest {
 	for k, v := range queryParams {
-		for _, val := range v {
-			r.query[k] = append(r.query[k], val)
-		}
+		r.query[k] = append(r.query[k], v...)
 	}
 	return r
 }
@@ -673,7 +693,7 @@ func (r *MockResponse) Bodyf(format string, args ...interface{}) *MockResponse {
 
 // BodyFromFile defines the mock response body from a file
 func (r *MockResponse) BodyFromFile(f string) *MockResponse {
-	b, err := ioutil.ReadFile(f)
+	b, err := os.ReadFile(f)
 	if err != nil {
 		panic(err)
 	}
@@ -691,6 +711,20 @@ func (r *MockResponse) JSON(v interface{}) *MockResponse {
 	default:
 		asJSON, _ := json.Marshal(x)
 		r.body = string(asJSON)
+	}
+	return r
+}
+
+// JSON is a convenience method for setting the mock response body
+func (r *MockResponse) XML(v interface{}) *MockResponse {
+	switch x := v.(type) {
+	case string:
+		r.body = x
+	case []byte:
+		r.body = string(x)
+	default:
+		asXML, _ := xml.Marshal(x)
+		r.body = string(asXML)
 	}
 	return r
 }
@@ -1029,7 +1063,7 @@ var bodyMatcher = func(req *http.Request, spec *MockRequest) error {
 		return errors.New("expected a body but received none")
 	}
 
-	body, err := ioutil.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return err
 	}
@@ -1038,7 +1072,7 @@ var bodyMatcher = func(req *http.Request, spec *MockRequest) error {
 	}
 
 	// replace body so it can be read again
-	req.Body = ioutil.NopCloser(bytes.NewReader(body))
+	req.Body = io.NopCloser(bytes.NewReader(body))
 
 	// Perform exact string match
 	bodyStr := string(body)
@@ -1062,6 +1096,22 @@ var bodyMatcher = func(req *http.Request, spec *MockRequest) error {
 		return fmt.Errorf("received body did not match expected mock body\n%s", diff(matchJSON, reqJSON))
 	}
 
+	// Perform XML match
+	var reqXML interface{}
+	reqXMLErr := xml.Unmarshal(body, &reqXML)
+
+	var matchXML interface{}
+	specXMLErr := xml.Unmarshal([]byte(mockBody), &matchXML)
+
+	isXML := reqXMLErr == nil && specXMLErr == nil
+	if isXML && reflect.DeepEqual(reqXML, matchXML) {
+		return nil
+	}
+
+	if isXML {
+		return fmt.Errorf("received body did not match expected mock body\n%s", diff(matchXML, reqXML))
+	}
+
 	return fmt.Errorf("received body did not match expected mock body\n%s", diff(mockBody, bodyStr))
 }
 
@@ -1076,7 +1126,7 @@ var bodyRegexpMatcher = func(req *http.Request, spec *MockRequest) error {
 		return errors.New("expected a body but received none")
 	}
 
-	body, err := ioutil.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return err
 	}
@@ -1085,7 +1135,7 @@ var bodyRegexpMatcher = func(req *http.Request, spec *MockRequest) error {
 	}
 
 	// replace body so it can be read again
-	req.Body = ioutil.NopCloser(bytes.NewReader(body))
+	req.Body = io.NopCloser(bytes.NewReader(body))
 
 	// Perform regexp match
 	bodyStr := string(body)

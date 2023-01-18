@@ -2,9 +2,10 @@ package apitest
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -673,6 +674,37 @@ func TestMocks_RequestBody(t *testing.T) {
 	}
 }
 
+func TestMocks_RequestBody_XML(t *testing.T) {
+	payload := struct {
+		XMLName xml.Name `xml:"entry"`
+		Ids     []int
+	}{
+		Ids: []int{13, 42},
+	}
+	payloadBytes, _ := xml.Marshal(payload)
+
+	testCases := make(map[string]any)
+	testCases["AsAny"] = payload
+	testCases["AsBytes"] = payloadBytes
+	testCases["AsString"] = string(payloadBytes)
+
+	for testName, testData := range testCases {
+		t.Run(testName, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/path",
+				strings.NewReader(`<entry><Ids>13</Ids><Ids>42</Ids></entry>`),
+			)
+			assert.NoError(t, bodyMatcher(
+				req,
+				NewMock().
+					Get("/").
+					XML(testData),
+			))
+		})
+	}
+}
+
 func TestMocks_PathMatcher(t *testing.T) {
 	tests := []struct {
 		requestUrl    string
@@ -972,7 +1004,7 @@ func TestMocks_Response_SetsTextPlainIfNoContentTypeSet(t *testing.T) {
 
 	response := buildResponseFromMock(mockResponse)
 
-	bytes, _ := ioutil.ReadAll(response.Body)
+	bytes, _ := io.ReadAll(response.Body)
 	assert.Equal(t, string(bytes), "abcdef")
 	assert.Equal(t, "text/plain", response.Header.Get("Content-Type"))
 }
@@ -985,7 +1017,7 @@ func TestMocks_Response_SetsTheBodyAsJSON(t *testing.T) {
 
 	response := buildResponseFromMock(mockResponse)
 
-	bytes, _ := ioutil.ReadAll(response.Body)
+	bytes, _ := io.ReadAll(response.Body)
 	assert.Equal(t, string(bytes), `{"a": 123}`)
 	assert.Equal(t, "application/json", response.Header.Get("Content-Type"))
 }
@@ -998,9 +1030,39 @@ func TestMocks_ResponseJSON(t *testing.T) {
 
 	response := buildResponseFromMock(mockResponse)
 
-	bytes, _ := ioutil.ReadAll(response.Body)
+	bytes, _ := io.ReadAll(response.Body)
 	assert.Equal(t, string(bytes), `{"a":123}`)
 	assert.Equal(t, "application/json", response.Header.Get("Content-Type"))
+}
+
+func TestMocks_ResponseXML(t *testing.T) {
+	payload := struct {
+		XMLName xml.Name `xml:"entry"`
+		Ids     []int
+	}{
+		Ids: []int{13, 42},
+	}
+	payloadBytes, _ := xml.Marshal(payload)
+
+	testCases := make(map[string]any)
+	testCases["AsAny"] = payload
+	testCases["AsBytes"] = payloadBytes
+	testCases["AsString"] = string(payloadBytes)
+
+	for testName, testData := range testCases {
+		t.Run(testName, func(t *testing.T) {
+			mockResponse := NewMock().
+				Get("assert").
+				RespondWith().
+				XML(testData)
+
+			response := buildResponseFromMock(mockResponse)
+
+			bytes, _ := io.ReadAll(response.Body)
+			assert.Equal(t, string(bytes), `<entry><Ids>13</Ids><Ids>42</Ids></entry>`)
+			assert.Equal(t, "application/xml", response.Header.Get("Content-Type"))
+		})
+	}
 }
 
 func TestMocks_Response_SetsTheBodyAsOther(t *testing.T) {
@@ -1012,7 +1074,7 @@ func TestMocks_Response_SetsTheBodyAsOther(t *testing.T) {
 
 	response := buildResponseFromMock(mockResponse)
 
-	bytes, _ := ioutil.ReadAll(response.Body)
+	bytes, _ := io.ReadAll(response.Body)
 	assert.Equal(t, string(bytes), `<html>123</html>`)
 	assert.Equal(t, "text/html", response.Header.Get("Content-Type"))
 }
@@ -1093,7 +1155,7 @@ func TestMocks_Standalone_WithContainer(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	data, err := ioutil.ReadAll(getRes.Body)
+	data, err := io.ReadAll(getRes.Body)
 
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"a": 12345}`, string(data))
@@ -1327,7 +1389,7 @@ func getUserData() []byte {
 	if err != nil {
 		panic(err)
 	}
-	bytes, err := ioutil.ReadAll(res.Body)
+	bytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		panic(err)
 	}
@@ -1384,7 +1446,7 @@ func NewHttpGet(cli *http.Client) HttpGet {
 			panic(err)
 		}
 
-		bytes, err := ioutil.ReadAll(res.Body)
+		bytes, err := io.ReadAll(res.Body)
 		if err != nil {
 			panic(err)
 		}
