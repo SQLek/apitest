@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/sbabiv/xml2map"
 	"github.com/steinfletcher/apitest/difflib"
 )
 
@@ -1097,11 +1098,13 @@ var bodyMatcher = func(req *http.Request, spec *MockRequest) error {
 	}
 
 	// Perform XML match
-	var reqXML interface{}
-	reqXMLErr := xml.Unmarshal(body, &reqXML)
+	reqXML, reqXMLErr := xml2map.NewDecoder(
+		bytes.NewBuffer(body),
+	).Decode()
 
-	var matchXML interface{}
-	specXMLErr := xml.Unmarshal([]byte(mockBody), &matchXML)
+	matchXML, specXMLErr := xml2map.NewDecoder(
+		bytes.NewBufferString(mockBody),
+	).Decode()
 
 	isXML := reqXMLErr == nil && specXMLErr == nil
 	if isXML && reflect.DeepEqual(reqXML, matchXML) {
